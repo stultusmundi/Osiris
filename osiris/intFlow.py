@@ -219,13 +219,15 @@ def addition_overflow_check(augend, addend, analysis, instruction, path_conditio
     # Add contraint for unsigned addition overflow checking
     if augend_sign == False and addend_sign == False:
         if max_size == 256:
-            s.add(Not(bvadd_no_overflow(augend, addend)))
+            #s.add(Not(bvadd_no_overflow(augend, addend)))
+            s.add(Not(z3.BVAddNoOverflow(augend, addend, False)))
         else:
             s.add(augend + addend > 2**max_size - 1)
     # Add contraint for signed addition overflow checking
     else:
         if max_size == 256:
-            s.add(Not(bvadd_no_overflow(augend, addend, True)))
+            #s.add(Not(bvadd_no_overflow(augend, addend, True)))
+            s.add(Not(z3.BVAddNoOverflow(augend, addend, True)))
         else:
             s.add(augend + addend > 2**(max_size - 1) - 1)
 
@@ -329,18 +331,21 @@ def multiplication_overflow_check(multiplier, multiplicand, analysis, instructio
     if multiplier_sign == False and multiplicand_sign == False:
         if max_size == 256:
             if multiplier.__class__.__name__ == "BitVecRef" and multiplicand.__class__.__name__ == "BitVecRef":
-                s.add(Not(bvmul_no_overflow(multiplier, multiplicand)))
+                #s.add(Not(bvmul_no_overflow(multiplier, multiplicand)))
+                s.add(Not(BVMulNoOverflow(multiplier, multiplicand, False)))
             else:
                 if multiplier.__class__.__name__ == "BitVecNumRef" and multiplicand.__class__.__name__ == "BitVecNumRef":
                     multiplier   = multiplier.as_long()
                     multiplicand = multiplicand.as_long()
-                s.add(Not(bvmul_no_overflow(multiplier, multiplicand)))
+                #s.add(Not(bvmul_no_overflow(multiplier, multiplicand)))
+                s.add(Not(BVMulNoOverflow(multiplier, multiplicand, False)))
         else:
             s.add(multiplier * multiplicand > 2**max_size - 1)
     # Add contraint for signed multiplication overflow checking
     else:
         if max_size == 256:
-            s.add(Not(bvmul_no_overflow(multiplier, multiplicand, True)))
+            #s.add(Not(bvmul_no_overflow(multiplier, multiplicand, True)))
+            s.add(Not(BVMulNoOverflow(multiplier, multiplicand, True)))
         else:
             s.add(multiplier * multiplicand > 2**(max_size - 1) - 1)
 
@@ -366,7 +371,7 @@ def multiplication_overflow_check(multiplier, multiplicand, analysis, instructio
                 print("===================================================")
             return False
     except Exception as e:
-        print e
+        print(e)
         traceback.print_exc()
         pass
     return False
@@ -444,13 +449,15 @@ def subtraction_underflow_check(minuend, subtrahend, analysis, instruction, path
             if simplify(minuend - subtrahend).__class__.__name__ == "BitVecNumRef":
                     s.add(simplify(minuend - subtrahend) < 0)
             else:
-                s.add(Not(bvsub_no_underflow(minuend, subtrahend)))
+                #s.add(Not(bvsub_no_underflow(minuend, subtrahend)))
+                s.add(Not(z3.BVSubNoUnderflow(minuend, subtrahend, False)))
         else:
             s.add(minuend - subtrahend < 0)
     # Add contraint for signed subtraction overflow checking
     else:
         if max_size == 256:
-            s.add(Not(bvsub_no_underflow(minuend, subtrahend, True)))
+            #s.add(Not(bvsub_no_underflow(minuend, subtrahend, True)))
+            s.add(Not(z3.BVSubNoUnderflow(minuend, subtrahend, True)))
         else:
             s.add(And(minuend - subtrahend < 0, UGE(minuend - subtrahend, 2**(max_size-1))))
     # Check on the satisfiability of the current formula

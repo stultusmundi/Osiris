@@ -62,3 +62,6 @@ class Generator:
 
     def gen_code_size_var(self, address):
         return "code_size_" + str(address)
+
+    def gen_accounts_var(self, address):
+        return "accounts_" + str(address)

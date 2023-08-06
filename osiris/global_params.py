@@ -67,7 +67,7 @@ CFG = 0
 MODEL_INPUT = 0
 
 # Directory to store json result files
-RESULTS_DIR = "results/"
+RESULTS_DIR = "/bdata2/sc/dataset/mainnet_test_result/osiris_sup_higher_result"
 
 # (Experimental) Interprocedural taint analysis (1) or Intraprocedural taint analysis (0)
 INTERPROCEDURAL_TAINT = 0

@@ -1,10 +1,11 @@
 from utils import run_command
-from ast_walker import AstWalker
+from ast_walker import AstWalker, AstWalker_Sup_high
 import json
 
 class AstHelper:
-    def __init__(self, filename):
+    def __init__(self, filename, high_ver):
         self.source_list = self.get_source_list(filename)
+        self.high_ver = high_ver
         self.contracts = self.extract_contract_definitions(self.source_list)
 
     def get_source_list(self, filename):
@@ -19,36 +20,56 @@ class AstHelper:
             "contractsByName": {},
             "sourcesByContract": {}
         }
-        walker = AstWalker()
+        if self.high_ver:
+            walker = AstWalker_Sup_high()
+        else:
+            walker = AstWalker()
         for k in sourcesList:
             nodes = []
-            walker.walk(sourcesList[k]["AST"], "ContractDefinition", nodes)
+            if self.high_ver:
+                walker.walk(sourcesList[k]["AST"], {"nodeType": "ContractDefinition"}, nodes)#    0.8
+            else:
+                walker.walk(sourcesList[k]["AST"], "ContractDefinition", nodes) #0.7
+            
             for node in nodes:
                 ret["contractsById"][node["id"]] = node
                 ret["sourcesByContract"][node["id"]] = k
-                ret["contractsByName"][k + ':' + node["attributes"]["name"]] = node
+                if self.high_ver:
+                    ret["contractsByName"][k + ':' + node["name"]] = node # 0.8
+                else:
+                    ret["contractsByName"][k + ':' + node["attributes"]["name"]] = node # 0.7
         return ret
 
     def get_linearized_base_contracts(self, id, contractsById):
-        return map(lambda id: contractsById[id], contractsById[id]["attributes"]["linearizedBaseContracts"])
+        if self.high_ver:
+            return map(lambda id: contractsById[id], contractsById[id]["linearizedBaseContracts"])  #0.8
+        else:
+            return map(lambda id: contractsById[id], contractsById[id]["attributes"]["linearizedBaseContracts"])    #0.7
 
     def extract_state_definitions(self, c_name):
         node = self.contracts["contractsByName"][c_name]
         state_vars = []
         if node:
             base_contracts = self.get_linearized_base_contracts(node["id"], self.contracts["contractsById"])
-            base_contracts = list(reversed(base_contracts))
+            base_contracts = list(reversed(list(base_contracts)))
             for contract in base_contracts:
                 if "children" in contract:
                     for item in contract["children"]:
                         if item["name"] == "VariableDeclaration":
+                            state_vars.append(item)
+                if "nodes" in contract:
+                    for item in contract["nodes"]:
+                        if item["nodeType"] == "VariableDeclaration":
                             state_vars.append(item)
         return state_vars
 
     def extract_states_definitions(self):
         ret = {}
         for contract in self.contracts["contractsById"]:
-            name = self.contracts["contractsById"][contract]["attributes"]["name"]
+            if self.high_ver:
+                name = self.contracts["contractsById"][contract]["name"]#0.8
+            else:
+                name = self.contracts["contractsById"][contract]["attributes"]["name"]  #0.7
             source = self.contracts["sourcesByContract"][contract]
             full_name = source + ":" + name
             ret[full_name] = self.extract_state_definitions(full_name)
@@ -56,16 +77,26 @@ class AstHelper:
 
     def extract_func_call_definitions(self, c_name):
         node = self.contracts["contractsByName"][c_name]
-        walker = AstWalker()
+        if self.high_ver:
+            walker = AstWalker_Sup_high()
+        else:
+            walker = AstWalker()
         nodes = []
         if node:
             walker.walk(node, "FunctionCall", nodes)
+            if self.high_ver:
+                walker.walk(node, {"nodeType":  "FunctionCall"}, nodes)
+            else:
+                walker.walk(node, "FunctionCall", nodes)
         return nodes
 
     def extract_func_calls_definitions(self):
         ret = {}
         for contract in self.contracts["contractsById"]:
-            name = self.contracts["contractsById"][contract]["attributes"]["name"]
+            if self.high_ver:
+                name = self.contracts["contractsById"][contract]["name"]#0.8
+            else:
+                name = self.contracts["contractsById"][contract]["attributes"]["name"]  #0.7
             source = self.contracts["sourcesByContract"][contract]
             full_name = source + ":" + name
             ret[full_name] = self.extract_func_call_definitions(full_name)
@@ -75,7 +106,10 @@ class AstHelper:
         state_variables = self.extract_states_definitions()[c_name]
         var_names = []
         for var_name in state_variables:
-            var_names.append(var_name["attributes"]["name"])
+            if self.high_ver:
+                var_names.append(var_name["name"])#0.8
+            else:
+                var_names.append(var_name["attributes"]["name"])  #0.7
         return var_names
 
     def extract_func_call_srcs(self, c_name):

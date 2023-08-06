@@ -14,11 +14,14 @@ import copy
 from z3 import *
 from z3.z3util import get_vars
 
+import six
+
 def ceil32(x):
     return x if x % 32 == 0 else x + 32 - (x % 32)
 
 def isSymbolic(value):
-    return not isinstance(value, (int, long))
+    # return not isinstance(value, (int, long))
+    return not isinstance(value, six.integer_types)
 
 def isAllSymbolic(*args):
     for element in args:
@@ -27,7 +30,8 @@ def isAllSymbolic(*args):
     return True
 
 def isReal(value):
-    return isinstance(value, (int, long))
+    # return isinstance(value, (int, long))
+    return isinstance(value, six.integer_types)
 
 def isAllReal(*args):
     for element in args:
@@ -107,7 +111,10 @@ def copy_all(*args):
 # check if a variable is a storage address in a contract
 # currently accept only int addresses in the storage
 def is_storage_var(var):
-    return isinstance(var, (int, long))
+    if six.PY2:
+        return isinstance(var, (int, long))
+    else:
+        return isinstance(var, int)
     #     return True
     # else:
     #     return isinstance(var, str) and var.startswith("Ia_store_")
@@ -235,7 +242,7 @@ def run_re_file(re_str, fn):
 
 
 def get_contract_info(contract_addr):
-    print "Getting info for contracts... " + contract_addr
+    print("Getting info for contracts... " + contract_addr)
     file_name1 = "tmp/" + contract_addr + "_txs.html"
     file_name2 = "tmp/" + contract_addr + ".html"
     # get number of txs
@@ -300,7 +307,7 @@ def get_distinct_contracts(list_of_contracts = "concurr.csv"):
             npath_i = int(contracts[i].split(",")[1])
             npair_i = int(contracts[i].split(",")[2])
             file_i = "stats/tmp_" + contract_i + ".evm"
-            print " reading file " + file_i
+            print(" reading file " + file_i)
             for j in range(i+1, n):
                 if flag[j] != j:
                     continue
@@ -322,12 +329,12 @@ def get_distinct_contracts(list_of_contracts = "concurr.csv"):
                                 ndiff += 1
                         if ndiff < 10:
                             flag[j] = i
-    print flag
+    print(flag)
 
 def run_command(cmd):
     FNULL = open(os.devnull, 'w')
     solc_p = subprocess.Popen(shlex.split(cmd), stdout=subprocess.PIPE, stderr=FNULL)
-    return solc_p.communicate()[0]
+    return solc_p.communicate()[0].decode('utf-8', 'strict')
 
 def remove_line_break_space(expression):
     try:

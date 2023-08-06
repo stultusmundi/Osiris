@@ -12,9 +12,12 @@ import global_params
 import z3
 import z3.z3util
 
+import six
+
 from source_map import SourceMap
 from utils import run_command
-from HTMLParser import HTMLParser
+#from HTMLParser import HTMLParser
+from html.parser import HTMLParser
 
 def cmd_exists(cmd):
     '''
@@ -60,19 +63,45 @@ def removeSwarmHash(evm):
     TODO Purpose?
     '''
     evm_without_hash = re.sub(r"a165627a7a72305820\S{64}0029$", "", evm)
+
+    evm_without_hash = re.sub(r"a265627a7a72305820\S{82}0032$", "", evm_without_hash)       # Constantinople
+    evm_without_hash = re.sub(r"a265627a7a72315820\S{82}0032$", "", evm_without_hash)
+
+    evm_without_hash = re.sub(r"a365627a7a72315820\S{110}0040$", "", evm_without_hash)      # Istanbul
+
+    evm_without_hash = re.sub(r"a26469706673582212\S{84}0033$", "", evm_without_hash)
     return evm_without_hash
 
 def extract_bin_str(s):
     '''
     Extracts binary representation of smart contract from solc output.
     '''
-    binary_regex = r"\r?\n======= (.*?) =======\r?\nBinary of the runtime part: \r?\n(.*?)\r?\n"
+    tested_solc_version = '0.5.16'
+    def compare_versions(version1, version2):
+        def normalize(v):
+            return [int(x) for x in re.sub(r'(\.0+)*$','', v).split(".")]
+        version1 = normalize(version1)
+        version2 = normalize(version2)
+        import six
+        if six.PY2:
+            return cmp(version1, version2)
+        else:
+            return (version1 > version2) - (version1 < version2)
+    
+    cmd = "solc --version"
+    out = run_command(cmd).strip()
+    solc_version = re.findall(r"Version: (\d*.\d*.\d*)", out)[0]
+
+    if compare_versions(solc_version, tested_solc_version) >= 0:
+        binary_regex = r"\n======= (.*?) =======\nBinary of the runtime part:\n(.*?)\n"
+    else:
+        binary_regex = r"\n======= (.*?) =======\nBinary of the runtime part: \n(.*?)\n"
     contracts = re.findall(binary_regex, s)
     contracts = [contract for contract in contracts if contract[1]]
     if not contracts:
         logging.critical("Solidity compilation failed")
-        print "======= error ======="
-        print "Solidity compilation failed"
+        print("======= error =======")
+        print("Solidity compilation failed")
         exit()
     return contracts
 
@@ -124,7 +153,7 @@ def analyze(processed_evm_file, disasm_file, source_map = None):
     try:
         disasm_p = subprocess.Popen(
             ["evm", "disasm", processed_evm_file], stdout=subprocess.PIPE)
-        disasm_out = disasm_p.communicate()[0]
+        disasm_out = disasm_p.communicate()[0].decode('utf-8', 'strict')
     except:
         logging.critical("Disassembly failed.")
         exit()
@@ -150,15 +179,15 @@ def remove_temporary_file(path):
 def main():
     global args
 
-    print("")
-    print("  .oooooo.             o8o            o8o          ")
-    print(" d8P'  `Y8b            `\"'            `\"'          ")
-    print("888      888  .oooo.o oooo  oooo d8b oooo   .oooo.o")
-    print("888      888 d88(  \"8 `888  `888\"\"8P `888  d88(  \"8")
-    print("888      888 `\"Y88b.   888   888      888  `\"Y88b. ")
-    print("`88b    d88' o.  )88b  888   888      888  o.  )88b")
-    print(" `Y8bood8P'  8\"\"888P' o888o d888b    o888o 8\"\"888P'")
-    print("")
+    # print("")
+    # print("  .oooooo.             o8o            o8o          ")
+    # print(" d8P'  `Y8b            `\"'            `\"'          ")
+    # print("888      888  .oooo.o oooo  oooo d8b oooo   .oooo.o")
+    # print("888      888 d88(  \"8 `888  `888\"\"8P `888  d88(  \"8")
+    # print("888      888 `\"Y88b.   888   888      888  `\"Y88b. ")
+    # print("`88b    d88' o.  )88b  888   888      888  o.  )88b")
+    # print(" `Y8bood8P'  8\"\"888P' o888o d888b    o888o 8\"\"888P'")
+    # print("")
 
     parser = argparse.ArgumentParser()
     group = parser.add_mutually_exclusive_group(required=True)
@@ -246,8 +275,8 @@ def main():
             global_params.GLOBAL_TIMEOUT = args.global_timeout
 
     # Check that our system has everything we need (evm, Z3)
-    if not has_dependencies_installed():
-        return
+    # if not has_dependencies_installed():
+    #     return
 
     # Retrieve contract from remote URL, if necessary
     if args.remote_URL:
@@ -302,10 +331,34 @@ def main():
             processed_evm_file = cname + '.evm'
             disasm_file = cname + '.evm.disasm'
 
+            ## To statistic
+            if processed_evm_file.startswith("/bdata2/sc/dataset/mainnet/"):
+                processed_evm_file = processed_evm_file.replace("/bdata2/sc/dataset/mainnet/", "/ssd/wcz/tmp/")
+                disasm_file = disasm_file.replace("/bdata2/sc/dataset/mainnet/", "/ssd/wcz/tmp/")
+            ## To statistic
+
+            # Check Solidity version >= 0.8.0
+            tested_solc_version = '0.8.0'
+            def compare_versions(version1, version2):
+                def normalize(v):
+                    return [int(x) for x in re.sub(r'(\.0+)*$','', v).split(".")]
+                version1 = normalize(version1)
+                version2 = normalize(version2)
+                if six.PY2:
+                    return cmp(version1, version2)
+                else:
+                    return (version1 > version2) - (version1 < version2)
+            
+            cmd = "solc --version"
+            out = run_command(cmd).strip()
+            solc_version = re.findall(r"Version: (\d*.\d*.\d*)", out)[0]
+            high_ver = (compare_versions(solc_version, tested_solc_version) >= 0)
+
             with open(processed_evm_file, 'w') as of:
                 of.write(removeSwarmHash(bin_str))
 
-            analyze(processed_evm_file, disasm_file, SourceMap(cname, args.source))
+            # if processed_evm_file == '/ssd/wcz/tmp/0xe5c83111f47cdae8855cd3e1989fdee8fcacc599.sol:Ownable.evm':
+            analyze(processed_evm_file, disasm_file, SourceMap(cname, args.source, high_ver))
 
             remove_temporary_file(processed_evm_file)
             remove_temporary_file(disasm_file)
@@ -315,11 +368,11 @@ def main():
                 with open(processed_evm_file, 'w') as of:
                     of.write(bin_str)
 
-        if global_params.STORE_RESULT:
-            if ':' in cname:
-                result_file = os.path.join(global_params.RESULTS_DIR, cname.split(':')[0].replace('.sol', '.json').split('/')[-1])
-                with open(result_file, 'a') as of:
-                    of.write("}")
+        # if global_params.STORE_RESULT:
+        #     if ':' in cname:
+        #         result_file = os.path.join(global_params.RESULTS_DIR, cname.split(':')[0].replace('.sol', '.json').split('/')[-1])
+        #         with open(result_file, 'a') as of:
+        #             of.write("}")
 
 if __name__ == '__main__':
     main()

@@ -30,6 +30,9 @@ from taintFlow import *
 import web3
 from web3 import Web3, IPCProvider
 
+import six
+import pdb
+
 log = logging.getLogger(__name__)
 
 UNSIGNED_BOUND_NUMBER = 2**256 - 1
@@ -56,7 +59,8 @@ class Parameter:
             "global_state": {},
             "path_conditions_and_vars": {}
         }
-        for (attr, default) in attr_defaults.iteritems():
+        #for (attr, default) in attr_defaults.iteritems():
+        for (attr, default) in six.iteritems(attr_defaults):
             setattr(self, attr, kwargs.get(attr, default))
 
     def copy(self):
@@ -191,6 +195,23 @@ def compare_storage_and_gas_unit_test(global_state, analysis):
     exit(test_status)
 
 def change_format():
+    def compare_versions(version1, version2):
+        def normalize(v):
+            return [int(x) for x in re.sub(r'(\.0+)*$','', v).split(".")]
+        version1 = normalize(version1)
+        version2 = normalize(version2)
+        if six.PY2:
+            return cmp(version1, version2)
+        else:
+            return (version1 > version2) - (version1 < version2)
+
+    from utils import run_command
+    cmd = "solc --version"
+    out = run_command(cmd).strip()
+    solc_version = re.findall(r"Version: (\d*.\d*.\d*)", out)[0]
+    tested_solc_version = '0.5.0'
+    high_ver_flag = (compare_versions(solc_version, tested_solc_version) >= 0)
+
     with open(c_name) as disasm_file:
         file_contents = disasm_file.readlines()
         i = 0
@@ -200,10 +221,12 @@ def change_format():
             line = line.replace('Missing opcode 0xfd', 'REVERT')
             line = line.replace('Missing opcode 0xfe', 'ASSERTFAIL')
             line = line.replace('Missing opcode', 'INVALID')
+            if not high_ver_flag:
+                line = line.replace('KECCAK256', 'SHA3')
             line = line.replace(':', '')
             lineParts = line.split(' ')
             try: # removing initial zeroes
-                lineParts[0] = str(int(lineParts[0]))
+                lineParts[0] = str(int(lineParts[0], 16))
 
             except:
                 lineParts[0] = lineParts[0]
@@ -258,7 +281,7 @@ def print_cfg():
                 label += "{0:#0{1}x}".format(address, address_width)+" "+instruction+" **[Error: "+error_list[0]["type"]+"]**"+"\l"
             else:
                 label += "{0:#0{1}x}".format(address, address_width)+" "+instruction+"\l"
-            address += 1 + (len(instruction.split(' ')[1].replace("0x", "")) / 2)
+            address += int(1 + (len(instruction.split(' ')[1].replace("0x", "")) / 2))
         if error:
             f.write(label+'",style=filled,color=red];\n')
         else:
@@ -458,7 +481,8 @@ def add_falls_to():
 
 def get_init_global_state(path_conditions_and_vars):
     global_state = {"balance" : {}, "pc": 0}
-    init_is = init_ia = deposited_value = sender_address = receiver_address = gas_price = origin = currentCoinbase = currentNumber = currentDifficulty = currentGasLimit = callData = None
+    init_is = init_ia = deposited_value = sender_address = receiver_address = gas_price = origin = currentCoinbase = currentNumber = currentDifficulty = currentGasLimit = callData = currentChainID = currentBaseFee = None
+
 
     if global_params.INPUT_STATE:
         with open('state.json') as f:
@@ -485,6 +509,11 @@ def get_init_global_state(path_conditions_and_vars):
                 currentDifficulty = int(state["env"]["currentDifficulty"], 16)
             if state["env"]["currentGasLimit"]:
                 currentGasLimit = int(state["env"]["currentGasLimit"], 16)
+            if state["env"]["currentChainID"]:
+                currentChainID = int(state["env"]["currentChainID"], 16)	#是否应该这样添加存疑？
+            if state["env"]["currentBaseFee"]:
+                currentBaseFee = int(state["env"]["currentBaseFee"], 16)
+
 
     # for some weird reason these 3 vars are stored in path_conditions insteaad of global_state
     else:
@@ -494,9 +523,11 @@ def get_init_global_state(path_conditions_and_vars):
         init_is = BitVec("init_Is", 256)
         init_ia = BitVec("init_Ia", 256)
 
+
     path_conditions_and_vars["Is"] = sender_address
     path_conditions_and_vars["Ia"] = receiver_address
     path_conditions_and_vars["Iv"] = deposited_value
+
 
     constraint = (deposited_value >= BitVecVal(0, 256))
     path_conditions_and_vars["path_condition"].append(constraint)
@@ -505,44 +536,65 @@ def get_init_global_state(path_conditions_and_vars):
     constraint = (init_ia >= BitVecVal(0, 256))
     path_conditions_and_vars["path_condition"].append(constraint)
 
+
     # update the balances of the "caller" and "callee"
+
 
     global_state["balance"]["Is"] = (init_is - deposited_value)
     global_state["balance"]["Ia"] = (init_ia + deposited_value)
+
 
     if not gas_price:
         new_var_name = gen.gen_gas_price_var()
         gas_price = BitVec(new_var_name, 256)
         path_conditions_and_vars[new_var_name] = gas_price
 
+
     if not origin:
         new_var_name = gen.gen_origin_var()
         origin = BitVec(new_var_name, 256)
         path_conditions_and_vars[new_var_name] = origin
+
 
     if not currentCoinbase:
         new_var_name = "IH_c"
         currentCoinbase = BitVec(new_var_name, 256)
         path_conditions_and_vars[new_var_name] = currentCoinbase
 
+
     if not currentNumber:
         new_var_name = "IH_i"
         currentNumber = BitVec(new_var_name, 256)
         path_conditions_and_vars[new_var_name] = currentNumber
+
 
     if not currentDifficulty:
         new_var_name = "IH_d"
         currentDifficulty = BitVec(new_var_name, 256)
         path_conditions_and_vars[new_var_name] = currentDifficulty
 
+
     if not currentGasLimit:
         new_var_name = "IH_l"
         currentGasLimit = BitVec(new_var_name, 256)
         path_conditions_and_vars[new_var_name] = currentGasLimit
 
+
+    if not currentChainID:
+        new_var_name = "IH_Ch"
+        currentChainID = BitVec(new_var_name, 256)
+        path_conditions_and_vars[new_var_name] = currentChainID
+
+
+    if not currentBaseFee:
+        new_var_name = "IH_b"
+        currentBaseFee = BitVec(new_var_name, 256)
+        path_conditions_and_vars[new_var_name] = currentBaseFee
+    
     new_var_name = "IH_s"
     currentTimestamp = BitVec(new_var_name, 256)
     path_conditions_and_vars[new_var_name] = currentTimestamp
+
 
     # the state of the current current contract
     if "Ia" not in global_state:
@@ -558,6 +610,9 @@ def get_init_global_state(path_conditions_and_vars):
     global_state["currentNumber"] = currentNumber
     global_state["currentDifficulty"] = currentDifficulty
     global_state["currentGasLimit"] = currentGasLimit
+    global_state["currentChainID"] = currentChainID
+    global_state["currentBaseFee"] = currentBaseFee
+
 
     return global_state
 
@@ -598,6 +653,8 @@ def sym_exec_block(params):
     calls = params.calls
     func_call = params.func_call
 
+    # print(block)
+    # print(jump_type[block])
     Edge = namedtuple("Edge", ["v1", "v2"]) # Factory Function for tuples is used as dictionary key
     if block < 0:
         log.debug("UNKNOWN JUMP ADDRESS. TERMINATING THIS PATH")
@@ -608,7 +665,8 @@ def sym_exec_block(params):
         print("STACK: " + str(stack))
 
     current_edge = Edge(pre_block, block)
-    if visited_edges.has_key(current_edge):
+    #if visited_edges.has_key(current_edge):
+    if current_edge in visited_edges.keys():
         updated_count_number = visited_edges[current_edge] + 1
         visited_edges.update({current_edge: updated_count_number})
     else:
@@ -665,7 +723,7 @@ def sym_exec_block(params):
 
         if global_params.DEBUG_MODE:
             if depth > global_params.DEPTH_LIMIT:
-                print "!!! DEPTH LIMIT EXCEEDED !!!"
+                print("!!! DEPTH LIMIT EXCEEDED !!!")
 
         total_no_of_paths += 1
 
@@ -684,9 +742,9 @@ def sym_exec_block(params):
                 pass
 
         if global_params.DEBUG_MODE:
-            print "Termintating path: "+str(total_no_of_paths)
-            print "Depth: "+str(depth)
-            print ""
+            print("Termintating path: "+str(total_no_of_paths))
+            print("Depth: "+str(depth))
+            print("")
 
         display_analysis(analysis)
         if global_params.UNIT_TEST == 1:
@@ -1456,7 +1514,7 @@ def sym_exec_ins(params):
             s0 = stack.pop(0)
             s1 = stack.pop(0)
             if isAllReal(s0, s1):
-                data = [mem[s0+i*32] for i in range(s1/32)]
+                data = [mem[s0+i*32] for i in range(int(s1/32))]
                 input = ''
                 symbolic = False
                 for value in data:
@@ -1464,7 +1522,44 @@ def sym_exec_ins(params):
                         input += str(value)
                         symbolic = True
                     else:
-                        input += binascii.unhexlify('%064x' % value)
+                        input += binascii.unhexlify('%064x' % value).decode('utf-8')
+                if input in sha3_list:
+                    stack.insert(0, sha3_list[input])
+                else:
+                    if symbolic:
+                        new_var_name = gen.gen_arbitrary_var()
+                        new_var = BitVec(new_var_name, 256)
+                        sha3_list[input] = new_var
+                        path_conditions_and_vars[new_var_name] = new_var
+                        stack.insert(0, new_var)
+                    else:
+                        hash = sha3.keccak_256(input).hexdigest()
+                        new_var = int(hash, 16)
+                        sha3_list[input] = new_var
+                        stack.insert(0, new_var)
+            else:
+                new_var_name = gen.gen_arbitrary_var()
+                new_var = BitVec(new_var_name, 256)
+                path_conditions_and_vars[new_var_name] = new_var
+                stack.insert(0, new_var)
+        else:
+            raise ValueError('STACK underflow')
+
+    elif instr_parts[0] == "KECCAK256":         #instead of SHA3, not change the code yet
+        if len(stack) > 1:
+            global_state["pc"] = global_state["pc"] + 1
+            s0 = stack.pop(0)
+            s1 = stack.pop(0)
+            if isAllReal(s0, s1):
+                data = [mem[s0+i*32] for i in range(int(s1/32))]
+                input = ''
+                symbolic = False
+                for value in data:
+                    if is_expr(value):
+                        input += str(value)
+                        symbolic = True
+                    else:
+                        input += binascii.unhexlify('%064x' % value).decode('utf-8')
                 if input in sha3_list:
                     stack.insert(0, sha3_list[input])
                 else:
@@ -1535,7 +1630,7 @@ def sym_exec_ins(params):
                     params_code = source_code[idx1:idx2]
                     params_list = params_code.split(",")
                     params_list = [param.split(" ")[-1] for param in params_list]
-                    param_idx = (position - 4) / 32
+                    param_idx = int((position - 4) / 32)
                     new_var_name = params_list[param_idx]
                     source_map.var_names.append(new_var_name)
                 else:
@@ -1577,7 +1672,7 @@ def sym_exec_ins(params):
             evm_file_name = c_name
         with open(evm_file_name, 'r') as evm_file:
             evm = evm_file.read()[:-1]
-            code_size = len(evm)/2
+            code_size = int(len(evm)/2)
             stack.insert(0, code_size)
     elif instr_parts[0] == "CODECOPY":
         if len(stack) > 2:
@@ -1588,7 +1683,10 @@ def sym_exec_ins(params):
             current_miu_i = global_state["miu_i"]
 
             if isAllReal(mem_location, current_miu_i, code_from, no_bytes):
-                temp = long(math.ceil((mem_location + no_bytes) / float(32)))
+                if six.PY2:
+                    temp = long(math.ceil((mem_location + no_bytes) / float(32)))
+                else:
+                    temp = int(math.ceil((mem_location + no_bytes) / float(32)))
                 if temp > current_miu_i:
                     current_miu_i = temp
 
@@ -1609,7 +1707,6 @@ def sym_exec_ins(params):
                 else:
                     new_var = BitVec(new_var_name, 256)
                     path_conditions_and_vars[new_var_name] = new_var
-
                 temp = ((mem_location + no_bytes) / 32) + 1
                 current_miu_i = to_symbolic(current_miu_i)
                 expression = current_miu_i < temp
@@ -1654,7 +1751,10 @@ def sym_exec_ins(params):
             current_miu_i = global_state["miu_i"]
 
             if isAllReal(address, mem_location, current_miu_i, code_from, no_bytes) and USE_GLOBAL_BLOCKCHAIN:
-                temp = long(math.ceil((mem_location + no_bytes) / float(32)))
+                if six.PY2:
+                    temp = long(math.ceil((mem_location + no_bytes) / float(32)))
+                else:
+                    temp = int(math.ceil((mem_location + no_bytes) / float(32)))
                 if temp > current_miu_i:
                     current_miu_i = temp
 
@@ -1743,7 +1843,10 @@ def sym_exec_ins(params):
             address = stack.pop(0)
             current_miu_i = global_state["miu_i"]
             if isAllReal(address, current_miu_i) and address in mem:
-                temp = long(math.ceil((address + 32) / float(32)))
+                if six.PY2:
+                    temp = long(math.ceil((address + 32) / float(32)))
+                else:
+                    temp = int(math.ceil((address + 32) / float(32)))
                 if temp > current_miu_i:
                     current_miu_i = temp
                 value = mem[address]
@@ -1793,7 +1896,11 @@ def sym_exec_ins(params):
                     memory[stored_address + i] = value % 256
                     value /= 256
             if isAllReal(stored_address, current_miu_i):
-                temp = long(math.ceil((stored_address + 32) / float(32)))
+                # temp = long(math.ceil((stored_address + 32) / float(32)))
+                if six.PY2:
+                    temp = long(math.ceil((stored_address + 32) / float(32)))
+                else:
+                    temp = int(math.ceil((stored_address + 32) / float(32)))
                 if temp > current_miu_i:
                     current_miu_i = temp
                 mem[stored_address] = stored_value  # note that the stored_value could be symbolic
@@ -1826,7 +1933,10 @@ def sym_exec_ins(params):
             stored_value = temp_value % 256  # get the least byte
             current_miu_i = global_state["miu_i"]
             if isAllReal(stored_address, current_miu_i):
-                temp = long(math.ceil((stored_address + 1) / float(32)))
+                if six.PY2:
+                    temp = long(math.ceil((stored_address + 1) / float(32)))
+                else:
+                    temp = int(math.ceil((stored_address + 1) / float(32)))
                 if temp > current_miu_i:
                     current_miu_i = temp
                 mem[stored_address] = stored_value  # note that the stored_value could be symbolic
@@ -2134,7 +2244,7 @@ def sym_exec_ins(params):
                 analysis["time_dependency_bug"][last_idx]
         else:
             raise ValueError('STACK underflow')
-    elif instr_parts[0] == "DELEGATECALL":
+    elif instr_parts[0] == "DELEGATECALL" or instr_parts[0] == "STATICCALL":
         if len(stack) > 5:
             global_state["pc"] += 1
             stack.pop(0)
@@ -2190,6 +2300,112 @@ def sym_exec_ins(params):
                 global_problematic_pcs["assertion_failure"].append(Assertion(global_state["pc"], models[-1]))
         except:
             pass
+    elif instr_parts[0] == "SHL":
+        if len(stack) > 1:
+            global_state["pc"] = global_state["pc"] + 1
+            first = stack.pop(0)    #shift
+            second = stack.pop(0)   #value
+
+
+            if first < 256:
+                computed = ((second << first) % (2 ** 256))
+            else:
+                computed = 0
+            
+            computed = simplify(computed) if is_expr(computed) else computed
+            stack.insert(0, computed)
+
+
+        else:
+            raise ValueError('STACK underflow')
+    elif instr_parts[0] == "SHR":
+        if len(stack) > 1:
+            global_state["pc"] = global_state["pc"] + 1
+            first = stack.pop(0)    #shift
+            second = stack.pop(0)   #value
+
+
+            if first < 256:
+                computed = second >> first
+            else:
+                computed = 0
+            
+            computed = simplify(computed) if is_expr(computed) else computed
+            stack.insert(0, computed)
+
+        else:
+            raise ValueError('STACK underflow')
+
+
+    elif instr_parts[0] == "SAR":
+        if len(stack) > 1:
+            global_state["pc"] = global_state["pc"] + 1
+            first = stack.pop(0)    #shift
+            second = stack.pop(0)   #value
+
+
+            if first < 256:
+                computed = second >> first
+            elif second >= 0:
+                computed = 0
+            else:
+                computed = UNSIGNED_BOUND_NUMBER
+            
+            computed = simplify(computed) if is_expr(computed) else computed
+            stack.insert(0, computed)
+
+
+        else:
+            raise ValueError('STACK underflow')
+
+    elif instr_parts[0] == "EXTCODEHASH":
+        if len(stack) > 1:
+            global_state["pc"] = global_state["pc"] + 1
+            address = stack.pop(0)
+            if isReal(address) and global_params.USE_GLOBAL_BLOCKCHAIN:
+                account = data_source.accounts(address)
+
+                if len(account) == 0:
+                    codehash = 0
+                else:
+                    sha_obj = SHA256.new()
+                    sha_obj.update(account)
+                    codehash = sha_obj.hexdigest()
+                stack.insert(0, codehash)
+            else:
+                #not handled yet
+                new_var_name = gen.gen_accounts_var(address)
+                if new_var_name in path_conditions_and_vars:
+                    new_var = path_conditions_and_vars[new_var_name]
+                else:
+                    new_var = BitVec(new_var_name, 256)
+                    path_conditions_and_vars[new_var_name] = new_var
+                stack.insert(0, new_var)
+        else:
+            raise ValueError('STACK underflow')
+    elif instr_parts[0] == "SELFBALANCE":
+        global_state["pc"] = global_state["pc"] + 1
+        address = path_conditions_and_vars["Ia"]
+        if isReal(address) and global_params.USE_GLOBAL_BLOCKCHAIN:
+            new_var = data_source.getBalance(address)
+        else:
+            new_var_name = gen.gen_balance_var()
+            if new_var_name in path_conditions_and_vars:
+                new_var = path_conditions_and_vars[new_var_name]
+            else:
+                new_var = BitVec(new_var_name, 256)
+                path_conditions_and_vars[new_var_name] = new_var
+        if isReal(address):
+            hashed_address = "concrete_address_" + str(address)
+        else:
+            hashed_address = str(address)
+        global_state["balance"][hashed_address] = new_var
+        stack.push(0, balance)
+
+
+    elif instr_parts[0] == "CHAINID": # new instruction in Istanbul
+        global_state["pc"] = global_state["pc"] + 1
+        stack.insert(0, global_state["currentChainID"])
     else:
         print("UNKNOWN INSTRUCTION: " + instr_parts[0])
         if global_params.UNIT_TEST == 2 or global_params.UNIT_TEST == 3:
@@ -2207,7 +2423,7 @@ def sym_exec_ins(params):
         perform_taint_analysis(vertices[params.pre_block], vertices[params.block], next_blocks, previous_pc, instr_parts[0], previous_stack, stack, arithmetic_errors)
     except Exception as e:
         traceback.print_exc()
-        print "Exception in taint analysis: "+str(e)
+        print("Exception in taint analysis: "+str(e)) 
         raise e
 
     try:
@@ -2379,7 +2595,7 @@ def check_callstack_attack(disasm):
     problematic_instructions = ['CALL', 'CALLCODE']
     pcs = []
     try:
-        for i in xrange(0, len(disasm)):
+        for i in range(0, len(disasm)):
             instruction = disasm[i]
             if instruction[1] in problematic_instructions:
                 pc = int(instruction[0])
@@ -2511,13 +2727,13 @@ def detect_arithmetic_errors():
     global results
 
     if global_params.DEBUG_MODE:
-        print ""
-        print "Number of arithmetic errors: "+str(len(arithmetic_errors))
+        print("")
+        print("Number of arithmetic errors: "+str(len(arithmetic_errors)))
         for error in arithmetic_errors:
             if error["validated"]:
-                print error
-                print error["instruction"]
-                print ""
+                print(error)
+                print(error["instruction"]) 
+                print("")
 
     arithmetic_bug_found = any([arithmetic_error for arithmetic_error in arithmetic_errors if arithmetic_error["validated"]])
     overflow_bug_found   = any([ErrorTypes.OVERFLOW in arithmetic_error["type"] for arithmetic_error in arithmetic_errors if arithmetic_error["validated"]])
@@ -2763,8 +2979,8 @@ def detect_bugs():
     global global_problematic_pcs
 
     if global_params.DEBUG_MODE:
-        print "Number of total paths: "+str(total_no_of_paths)
-        print ""
+        print("Number of total paths: "+str(total_no_of_paths))
+        print("")
 
     if instructions:
         evm_code_coverage = float(len(visited_pcs)) / len(instructions.keys()) * 100
@@ -2838,24 +3054,28 @@ def closing_message():
     global results
 
     log.info("\t====== Analysis Completed ======")
+    # if global_params.STORE_RESULT:
+    #     result_file = os.path.join(global_params.RESULTS_DIR, c_name+'.json'.split('/')[-1])
+    #     if '.sol' in c_name:
+    #         result_file = os.path.join(global_params.RESULTS_DIR, c_name.split(':')[0].replace('.sol', '.json').split('/')[-1])
+    #     elif '.bin.evm.disasm' in c_name:
+    #         result_file = os.path.join(global_params.RESULTS_DIR, c_name.replace('.bin.evm.disasm', '.json').split('/')[-1])
+    #     if not os.path.isfile(result_file):
+    #         with open(result_file, 'a') as of:
+    #             if ':' in c_name:
+    #                 of.write("{")
+    #                 of.write('"'+str(c_name.split(':')[1].replace('.evm.disasm', ''))+'":')
+    #             of.write(json.dumps(results, indent=1))
+    #     else:
+    #         with open(result_file, 'a') as of:
+    #             if ':' in c_name:
+    #                 of.write(",")
+    #                 of.write('"'+str(c_name.split(':')[1].replace('.evm.disasm', ''))+'":')
+    #             of.write(json.dumps(results, indent=1))
     if global_params.STORE_RESULT:
-        result_file = os.path.join(global_params.RESULTS_DIR, c_name+'.json'.split('/')[-1])
-        if '.sol' in c_name:
-            result_file = os.path.join(global_params.RESULTS_DIR, c_name.split(':')[0].replace('.sol', '.json').split('/')[-1])
-        elif '.bin.evm.disasm' in c_name:
-            result_file = os.path.join(global_params.RESULTS_DIR, c_name.replace('.bin.evm.disasm', '.json').split('/')[-1])
-        if not os.path.isfile(result_file):
-            with open(result_file, 'a') as of:
-                if ':' in c_name:
-                    of.write("{")
-                    of.write('"'+str(c_name.split(':')[1].replace('.evm.disasm', ''))+'":')
-                of.write(json.dumps(results, indent=1))
-        else:
-            with open(result_file, 'a') as of:
-                if ':' in c_name:
-                    of.write(",")
-                    of.write('"'+str(c_name.split(':')[1].replace('.evm.disasm', ''))+'":')
-                of.write(json.dumps(results, indent=1))
+        result_file = os.path.join(global_params.RESULTS_DIR, (c_name.split('.evm.disasm')[0]+'.json').split('/')[-1])
+        with open(result_file, 'w') as of:
+            of.write(json.dumps(results, indent=1))
         log.info("Wrote results to %s.", result_file)
 
 def handler(signum, frame):
@@ -2863,7 +3083,7 @@ def handler(signum, frame):
 
     if global_params.UNIT_TEST == 2 or global_params.UNIT_TEST == 3:
         exit(TIME_OUT)
-    print "!!! SYMBOLIC EXECUTION TIMEOUT !!!"
+    print("!!! SYMBOLIC EXECUTION TIMEOUT !!!")
     g_timeout = True
     raise Exception("timeout")
 
@@ -2872,8 +3092,8 @@ def results_for_web():
 
     results["filename"] = source_map.cname.split(":")[0].split("/")[-1]
     results["cname"] = source_map.cname.split(":")[1]
-    print "======= results ======="
-    print json.dumps(results)
+    print("======= results =======")
+    print(json.dumps(results))
 
 def main(contract, contract_sol, _source_map = None):
     global c_name

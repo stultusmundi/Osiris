@@ -24,12 +24,13 @@ class SourceMap:
     sources = {}
     ast_helper = None
 
-    def __init__(self, cname, parent_filename):
+    def __init__(self, cname, parent_filename, high_ver):
         self.cname = cname
         if not SourceMap.parent_filename:
             SourceMap.parent_filename = parent_filename
             SourceMap.position_groups = SourceMap.__load_position_groups()
-            SourceMap.ast_helper = AstHelper(SourceMap.parent_filename)
+            SourceMap.high_ver = high_ver
+            SourceMap.ast_helper = AstHelper(SourceMap.parent_filename, SourceMap.high_ver)
         self.source = self.__get_source()
         self.positions = self.__get_positions()
         self.instr_positions = {}
@@ -89,7 +90,8 @@ class SourceMap:
 
     def __get_source(self):
         fname = self.__get_filename()
-        if SourceMap.sources.has_key(fname):
+        # if SourceMap.sources.has_key(fname):
+        if fname in SourceMap.sources:
             return SourceMap.sources[fname]
         else:
             SourceMap.sources[fname] = Source(fname)
