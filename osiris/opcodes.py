@@ -202,7 +202,7 @@ def get_ins_cost(opcode):
         return GCOST["Gjumpdest"]
     elif opcode == "SHA3":
         return GCOST["Gsha3"]
-    elif opcode == ("CREATE", "CREATE2"):
+    elif opcode in ("CREATE", "CREATE2"):
         return GCOST["Gcreate"]
     elif opcode in ("CALL", "CALLCODE"):
         return GCOST["Gcall"]
